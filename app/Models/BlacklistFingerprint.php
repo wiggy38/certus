@@ -14,10 +14,10 @@ use Illuminate\Database\Eloquent\Model;
  * FingerprintService::verifierBlacklist().
  *
  * Le signal indique le type de piratage détecté lors du bannissement :
- *   1 = CLONAGE         (même licence active sur un autre poste)
- *   2 = MULTI_INSTANCE  (quota de postes dépassé)
- *   3 = REJEU           (nonce anti-replay consommé)
- *   4 = FALSIFICATION   (signature HMAC invalide)
+ *   1 = QUOTA_POSTES    (nb_activations_actives >= nb_postes)
+ *   3 = MULTI_LICENCES  (même fingerprint actif sur 2+ licences différentes)
+ *   4 = CLE_PARTAGEE    (anti_rejeu connu + fingerprint inconnu → clé partagée)
+ *   (Signal 2 = rafale : incrémente tentatives_suspectes, sans entrée blacklist)
  *
  * @property int         $blacklist_id
  * @property string      $fingerprint  SHA-256 de la machine (64 hex)
@@ -40,19 +40,21 @@ class BlacklistFingerprint extends Model
     public $timestamps    = false;
 
     // ----------------------------------------------------------------
-    // Constantes — Signaux de piratage
+    // Constantes — Signaux de piratage (valeurs stockées en DB)
     // ----------------------------------------------------------------
 
-    const SIGNAL_CLONAGE        = 1;
-    const SIGNAL_MULTI_INSTANCE = 2;
-    const SIGNAL_REJEU          = 3;
-    const SIGNAL_FALSIFICATION  = 4;
+    // Signal 1 : quota de postes autorisés atteint
+    const SIGNAL_QUOTA_POSTES    = 1;
+    // Signal 2 : rafale d'activations — NE crée PAS d'entrée blacklist (juste tentatives_suspectes++)
+    // Signal 3 : fingerprint actif sur plusieurs licences différentes
+    const SIGNAL_MULTI_LICENCES  = 3;
+    // Signal 4 : anti_rejeu déjà enregistré + fingerprint inconnu (clé partagée)
+    const SIGNAL_CLE_PARTAGEE    = 4;
 
     const SIGNAUX = [
-        self::SIGNAL_CLONAGE        => 'CLONAGE',
-        self::SIGNAL_MULTI_INSTANCE => 'MULTI_INSTANCE',
-        self::SIGNAL_REJEU          => 'REJEU',
-        self::SIGNAL_FALSIFICATION  => 'FALSIFICATION',
+        self::SIGNAL_QUOTA_POSTES   => 'QUOTA_POSTES',
+        self::SIGNAL_MULTI_LICENCES => 'MULTI_LICENCES',
+        self::SIGNAL_CLE_PARTAGEE   => 'CLE_PARTAGEE',
     ];
 
     protected $fillable = [

@@ -54,10 +54,10 @@ final class ErrorCodes
     // ----------------------------------------------------------------
     // Signaux de piratage (les 4 signaux Certus)
     // ----------------------------------------------------------------
-    const SIGNAL_CLONAGE         = 'SIGNAL_CLONAGE';        // même licence, fingerprint différent
-    const SIGNAL_MULTI_INSTANCE  = 'SIGNAL_MULTI_INSTANCE'; // trop d'instances simultanées
-    const SIGNAL_REJEU           = 'SIGNAL_REJEU';          // nonce déjà utilisé
-    const SIGNAL_FALSIFICATION   = 'SIGNAL_FALSIFICATION';  // signature clé invalide
+    const QUOTA_POSTES_ATTEINT      = 'QUOTA_POSTES_ATTEINT';      // S1 : nb_activations_actives >= nb_postes
+    const SIGNAL_RAFALE             = 'SIGNAL_RAFALE';              // S2 : > 5 activations en 1 heure (warn only)
+    const FINGERPRINT_MULTI_LICENCES = 'FINGERPRINT_MULTI_LICENCES'; // S3 : même fingerprint sur 2+ licences
+    const CLE_PARTAGEE_DETECTEE     = 'CLE_PARTAGEE_DETECTEE';     // S4 : anti_rejeu connu + fingerprint inconnu
 
     // ----------------------------------------------------------------
     // Authentification API
