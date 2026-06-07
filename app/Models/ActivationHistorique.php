@@ -2,8 +2,7 @@
 
 namespace App\Models;
 
-use App\Constants\ErrorCodes;
-use App\Exceptions\CertusException;
+use App\Models\Traits\ReadOnlyModel;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -12,27 +11,29 @@ use Illuminate\Database\Eloquent\Model;
  * Cette table constitue la piste d'audit des activations Experto.
  * Aucune modification ni suppression n'est autorisée après insertion.
  *
- * GARANTIE D'IMMUTABILITÉ : update() et delete() lèvent une CertusException.
- * Utiliser uniquement ::create() ou le raccourci ::enregistrer().
+ * La protection INSERT-ONLY est assurée par le trait ReadOnlyModel.
+ * Seul point d'écriture autorisé : ::enregistrer().
  *
- * @property int    $histo_id
- * @property int    $activation_id     FK → activations.activation_id
- * @property string $licence_id        FK → licences.licence_id
- * @property string $evenement         ACTIVATION | DESACTIVATION | REACTIVATION | EXPIRATION
- * @property string $acteur            Initiateur de l'événement (user id, 'systeme', 'api'…)
+ * @property int         $histo_id
+ * @property int         $activation_id  FK → activations.activation_id
+ * @property string      $licence_id     FK → licences.licence_id
+ * @property string      $evenement      ACTIVATION|DESACTIVATION|REACTIVATION|EXPIRATION
+ * @property string      $acteur         Initiateur de l'événement
  * @property string|null $ip_source
  * @property string|null $motif
  * @property \Carbon\Carbon $horodatage
  */
 class ActivationHistorique extends Model
 {
+    use ReadOnlyModel;
+
     // ----------------------------------------------------------------
     // Configuration Eloquent
     // ----------------------------------------------------------------
 
-    protected $table   = 'activation_historique';
+    protected $table      = 'activation_historique';
     protected $primaryKey = 'histo_id';
-    public $timestamps = false;    // horodatage géré manuellement
+    public $timestamps    = false;
 
     // ----------------------------------------------------------------
     // Constantes — Événements possibles
@@ -82,60 +83,6 @@ class ActivationHistorique extends Model
     }
 
     // ----------------------------------------------------------------
-    // PROTECTION INSERT-ONLY — Surcharge des méthodes de mutation
-    // ----------------------------------------------------------------
-
-    /**
-     * Interdit toute modification d'un enregistrement existant.
-     *
-     * @throws CertusException 405 à chaque appel sur un enregistrement existant
-     */
-    public function save(array $options = []): bool
-    {
-        if ($this->exists) {
-            throw new CertusException(
-                ErrorCodes::ERREUR_INTERNE,
-                'activation_historique est INSERT-ONLY : la modification est interdite. '
-                . 'Utilisez ::enregistrer() pour ajouter un événement.',
-                ['histo_id' => $this->histo_id],
-                405,
-            );
-        }
-
-        return parent::save($options);
-    }
-
-    /**
-     * Interdit la mise à jour par appel direct à update().
-     *
-     * @throws CertusException 405
-     */
-    public function update(array $attributes = [], array $options = []): bool
-    {
-        throw new CertusException(
-            ErrorCodes::ERREUR_INTERNE,
-            'activation_historique est INSERT-ONLY : update() est interdit.',
-            ['histo_id' => $this->histo_id ?? null],
-            405,
-        );
-    }
-
-    /**
-     * Interdit la suppression par appel direct à delete().
-     *
-     * @throws CertusException 405
-     */
-    public function delete(): bool|null
-    {
-        throw new CertusException(
-            ErrorCodes::ERREUR_INTERNE,
-            'activation_historique est INSERT-ONLY : delete() est interdit.',
-            ['histo_id' => $this->histo_id ?? null],
-            405,
-        );
-    }
-
-    // ----------------------------------------------------------------
     // Relations
     // ----------------------------------------------------------------
 
@@ -157,7 +104,6 @@ class ActivationHistorique extends Model
 
     /**
      * Crée et persiste un enregistrement d'historique.
-     * C'est la SEULE méthode autorisée pour écrire dans cette table.
      *
      * @param int         $activationId
      * @param string      $licenceId
@@ -184,7 +130,7 @@ class ActivationHistorique extends Model
             'horodatage'    => now(),
         ]);
 
-        // $histo->exists est false → notre save() passe en parent::save() (insert)
+        // $histo->exists === false → ReadOnlyModel::save() délègue à parent::save() (INSERT)
         $histo->save();
 
         return $histo;
