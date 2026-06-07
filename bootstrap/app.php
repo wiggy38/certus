@@ -15,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+
+        $middleware->alias([
+            'api.key'       => \App\Http\Middleware\ApiKeyMiddleware::class,
+            'api.key.admin' => \App\Http\Middleware\ApiKeyAdminMiddleware::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

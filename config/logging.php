@@ -127,6 +127,19 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        // ----------------------------------------------------------------
+        // Canal dédié Certus — storage/logs/certus-YYYY-MM-DD.log
+        // Utilisé par tous les Services et Controllers Certus.
+        // Rotation quotidienne, conservation 30 jours.
+        // ----------------------------------------------------------------
+        'certus' => [
+            'driver'               => 'daily',
+            'path'                 => storage_path('logs/certus.log'),
+            'level'                => env('CERTUS_LOG_LEVEL', 'debug'),
+            'days'                 => env('CERTUS_LOG_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
     ],
 
 ];
