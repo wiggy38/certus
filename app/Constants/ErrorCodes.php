@@ -24,6 +24,7 @@ final class ErrorCodes
     const CLE_INVALIDE           = 'CLE_INVALIDE';
     const CLE_FORMAT_INVALIDE    = 'CLE_FORMAT_INVALIDE';
     const CLE_SIGNATURE_INVALIDE = 'CLE_SIGNATURE_INVALIDE';
+    const CLE_CRC_INVALIDE       = 'CLE_CRC_INVALIDE';
 
     // ----------------------------------------------------------------
     // Fingerprint machine
