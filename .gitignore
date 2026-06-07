@@ -1,0 +1,51 @@
+# Dépendances
+/vendor
+/node_modules
+
+# Fichiers d'environnement (NE JAMAIS commiter)
+.env
+.env.backup
+.env.production
+.env.*.local
+
+# Clés et secrets
+/storage/*.key
+/auth.json
+
+# Build assets
+/public/build
+/public/hot
+/public/storage
+/public/fonts-manifest.dev.json
+
+# Logs
+*.log
+/storage/logs/
+/storage/pail
+
+# Cache & tests
+.phpunit.result.cache
+/.phpunit.cache
+
+# Système
+.DS_Store
+Thumbs.db
+
+# IDE / éditeurs
+/.idea
+/.vscode
+/.cursor/
+/.zed
+/.nova
+/.codex
+.phpactor.json
+
+# Laravel spécifiques
+Homestead.json
+Homestead.yaml
+_ide_helper.php
+_ide_helper_models.php
+.php-cs-fixer.cache
+
+# SQLite (utilisé uniquement en dev si nécessaire)
+/database/database.sqlite
