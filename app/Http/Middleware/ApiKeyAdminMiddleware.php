@@ -9,9 +9,13 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Restreint l'accès aux organisations ayant le rôle ADMIN.
+ * Restreint l'accès aux clés API de rôle ADMIN.
  *
- * DOIT être chaîné après ApiKeyMiddleware (qui injecte l'organisation).
+ * ÉVOLUTION SCHEMA : le rôle n'est plus stocké sur `organisations`.
+ * Il sera porté par la colonne `role` de la future table `api_keys`.
+ *
+ * Ce middleware doit être chaîné après ApiKeyMiddleware, qui injectera
+ * le rôle via $request->attributes->set('api_key_role', $role).
  *
  * Usage dans les routes :
  *   Route::middleware(['api.key', 'api.key.admin'])->group(function () { ... });
@@ -31,7 +35,13 @@ class ApiKeyAdminMiddleware
             );
         }
 
-        if (! $organisation->estAdmin()) {
+        // TODO: lire le rôle depuis les attributs injectés par ApiKeyMiddleware
+        // $role = $request->attributes->get('api_key_role');
+        // if ($role !== 'ADMIN') { ... }
+
+        $role = $request->attributes->get('api_key_role');
+
+        if ($role !== 'ADMIN') {
             return $this->erreur(
                 ErrorCodes::API_KEY_INSUFFISANTE,
                 'Accès refusé : droits ADMIN requis pour cette ressource.',
