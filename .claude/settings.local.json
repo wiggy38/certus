@@ -4,7 +4,9 @@
       "Bash(php --version)",
       "Bash(composer --version)",
       "PowerShell(php --version)",
-      "PowerShell(composer --version)"
+      "PowerShell(composer --version)",
+      "Bash(mysql -u root -P 3307 -e \"CREATE DATABASE IF NOT EXISTS certus_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; SHOW DATABASES LIKE 'certus_db';\")",
+      "PowerShell(& \"E:\\\\CODELAB\\\\WAMP\\\\bin\\\\mariadb\\\\mariadb11.4.9\\\\bin\\\\mysql.exe\" -u root -P 3307 -e \"CREATE DATABASE IF NOT EXISTS certus_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; SHOW DATABASES LIKE 'certus_db';\")"
     ]
   }
 }

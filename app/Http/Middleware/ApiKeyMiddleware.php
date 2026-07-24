@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Constants\ErrorCodes;
+use App\Models\ApiKey;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -10,29 +11,19 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Vérifie la présence et la validité du header X-API-Key.
  *
- * ÉVOLUTION SCHEMA : la table `organisations` ne stocke plus les clés API.
- * Les clés API seront portées par une table dédiée `api_keys` (à créer) :
+ * En cas de succès, deux attributs sont injectés dans la requête :
+ *   $request->attributes->get('apiKey')       → instance ApiKey (model)
+ *   $request->attributes->get('apiKeyNiveau') → 'ADMIN' | 'CLIENT'
  *
- *   api_keys
- *     id           BIGINT PK
- *     org_id       VARCHAR(10) FK → organisations.org_id
- *     cle_hachee   VARCHAR(64)  -- SHA-256 de la clé en clair
- *     role         ENUM('CLIENT','ADMIN')
- *     expire_le    DATETIME NULL
- *     active       TINYINT(1) DEFAULT 1
- *
- * En attendant, ce middleware est en attente d'implémentation.
- *
- * Usage dans les routes :
- *   Route::middleware('api.key')->group(function () { ... });
+ * Ce middleware doit être appliqué AVANT api.key.admin.
  */
 class ApiKeyMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $apiKey = $request->header('X-API-Key');
+        $cleEnClair = $request->header('X-API-Key');
 
-        if (empty($apiKey)) {
+        if (empty($cleEnClair)) {
             return $this->erreur(
                 ErrorCodes::API_KEY_MANQUANTE,
                 "L'en-tête X-API-Key est requis.",
@@ -40,27 +31,20 @@ class ApiKeyMiddleware
             );
         }
 
-        // TODO: implémenter la vérification via la table `api_keys`
-        //
-        // $apiKeyRecord = \App\Models\ApiKey::query()
-        //     ->where('cle_hachee', hash('sha256', $apiKey))
-        //     ->where('active', 1)
-        //     ->where(fn ($q) => $q->whereNull('expire_le')->orWhere('expire_le', '>', now()))
-        //     ->with('organisation')
-        //     ->first();
-        //
-        // if (! $apiKeyRecord) {
-        //     return $this->erreur(ErrorCodes::API_KEY_INVALIDE, 'Clé API invalide.', 401);
-        // }
-        //
-        // $request->attributes->set('organisation', $apiKeyRecord->organisation);
-        // $request->attributes->set('api_key_role', $apiKeyRecord->role);
+        $apiKey = ApiKey::verifier($cleEnClair);
 
-        return $this->erreur(
-            ErrorCodes::API_KEY_INVALIDE,
-            'Système d\'authentification par clé API non encore configuré. Table api_keys manquante.',
-            501,
-        );
+        if ($apiKey === null) {
+            return $this->erreur(
+                ErrorCodes::API_KEY_INVALIDE,
+                'Clé API invalide ou désactivée.',
+                401,
+            );
+        }
+
+        $request->attributes->set('apiKey', $apiKey);
+        $request->attributes->set('apiKeyNiveau', $apiKey->niveau);
+
+        return $next($request);
     }
 
     private function erreur(string $code, string $message, int $status): Response

@@ -69,8 +69,26 @@ abstract class BaseApiController extends Controller
     // ----------------------------------------------------------------
 
     /**
+     * Retourne l'identifiant de l'acteur courant (nom de la clé API, ≤ 50 chars).
+     * Utilisé pour renseigner le champ `acteur` dans les modèles AuditLog et historiques.
+     */
+    protected function acteurCourant(Request $request): string
+    {
+        $apiKey = $request->attributes->get('apiKey');
+
+        if ($apiKey instanceof \App\Models\ApiKey) {
+            return mb_substr($apiKey->nom, 0, 50);
+        }
+
+        return 'systeme';
+    }
+
+    /**
      * Retourne l'organisation authentifiée injectée par ApiKeyMiddleware.
      * Lever une exception si appelé sur une route non protégée.
+     *
+     * @deprecated Ce helper était lié à l'ancien schéma (api_key sur organisations).
+     *             Préférer $request->attributes->get('apiKey') directement.
      */
     protected function organisationCourante(Request $request): Organisation
     {

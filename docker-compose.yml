@@ -1,0 +1,98 @@
+# ============================================================
+# Certus — Stack de production Docker Compose
+# ============================================================
+# Usage :
+#   cp .env.production .env
+#   docker compose up -d
+#   docker compose exec app php artisan migrate --force
+#   docker compose exec app php artisan db:seed --class=ApiKeySeeder
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # App — Laravel 11 (PHP 8.3-FPM + Nginx)
+  # ----------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: certus_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./storage:/var/www/certus/storage
+      - ./bootstrap/cache:/var/www/certus/bootstrap/cache
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - certus_net
+
+  # ----------------------------------------------------------
+  # DB — MariaDB 10.11
+  # ----------------------------------------------------------
+  db:
+    image: mariadb:10.11
+    container_name: certus_db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-change_me_in_production}
+      MARIADB_DATABASE:      ${DB_DATABASE:-certus_db}
+      MARIADB_USER:          ${DB_USERNAME:-certus}
+      MARIADB_PASSWORD:      ${DB_PASSWORD:-change_me_in_production}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-file-format=Barracuda
+      - --innodb-default-row-format=DYNAMIC
+      - --innodb-strict-mode=ON
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - certus_net
+
+  # ----------------------------------------------------------
+  # Queue — artisan queue:work (jobs de mail + piratage)
+  # ----------------------------------------------------------
+  queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: certus_queue
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: >
+      php artisan queue:work
+        --sleep=3
+        --tries=3
+        --timeout=60
+        --max-time=3600
+    volumes:
+      - ./storage:/var/www/certus/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - certus_net
+
+# ----------------------------------------------------------------
+volumes:
+  db_data:
+    driver: local
+
+networks:
+  certus_net:
+    driver: bridge

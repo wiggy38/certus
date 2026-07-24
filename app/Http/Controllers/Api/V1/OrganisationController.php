@@ -3,48 +3,38 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Constants\ErrorCodes;
-use App\Http\Resources\OrganisationResource;
+use App\Models\AuditLog;
 use App\Models\Organisation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 
 /**
- * Gestion des organisations clientes.
+ * Gestion des organisations clientes — Parcours 1.
  *
- * Routes (toutes protégées par api.key.admin sauf show) :
- *   GET    /api/v1/organisations           → index()
- *   POST   /api/v1/organisations           → store()
- *   GET    /api/v1/organisations/{id}      → show()
- *   PUT    /api/v1/organisations/{id}      → update()
- *   DELETE /api/v1/organisations/{id}      → destroy()
+ * Routes (protégées par api.key.admin) :
+ *   POST  /api/v1/organisations           → store()
+ *   GET   /api/v1/organisations/{org_id}  → show()
  */
 class OrganisationController extends BaseApiController
 {
-    /** Liste paginée de toutes les organisations. */
-    public function index(Request $request): JsonResponse
-    {
-        $paginator = Organisation::withCount('licences')
-            ->paginate($request->integer('par_page', 20));
-
-        return $this->liste(
-            OrganisationResource::collection($paginator),
-            $this->metaPagination($paginator),
-        );
-    }
-
-    /** Crée une nouvelle organisation et génère sa clé API. */
+    /**
+     * Crée une nouvelle organisation cliente.
+     *
+     * L'org_id (ex: "ORG-00001") et l'org_index_b36 (ex: "1") sont générés
+     * automatiquement par le boot() du modèle Organisation de façon thread-safe.
+     *
+     * Retourne uniquement org_id et org_index_b36 — les autres champs sont
+     * consultables via show().
+     */
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'nom'          => ['required', 'string', 'max:191'],
-            'email'        => ['required', 'email', 'unique:organisations,email'],
-            'telephone'    => ['nullable', 'string', 'max:50'],
-            'adresse'      => ['nullable', 'string', 'max:255'],
-            'pays'         => ['nullable', 'string', 'size:2'],
-            'api_key_role' => ['in:CLIENT,ADMIN'],
-            'notes'        => ['nullable', 'string'],
+            'nom'           => ['required', 'string', 'max:191'],
+            'email_contact' => ['required', 'email', 'max:191'],
+            'telephone'     => ['nullable', 'string', 'max:50'],
+            'adresse'       => ['nullable', 'string', 'max:255'],
+            'pays'          => ['required', 'string', 'size:2'],
         ]);
 
         if ($validator->fails()) {
@@ -56,63 +46,59 @@ class OrganisationController extends BaseApiController
             );
         }
 
-        $organisation = Organisation::create(array_merge(
-            $validator->validated(),
-            [
-                'statut'       => 'actif',
-                'api_key'      => Str::random(64),
-                'api_key_role' => $request->input('api_key_role', 'CLIENT'),
-            ],
-        ));
+        $donnees = $validator->validated();
+        $acteur  = $this->acteurCourant($request);
 
-        // Retourne la clé API une seule fois à la création (jamais renvoyée ensuite)
-        $data = (new OrganisationResource($organisation))->toArray($request);
-        $data['api_key'] = $organisation->api_key;
-
-        return $this->cree($data, ['message' => 'Conservez cette clé API : elle ne sera plus affichée.']);
-    }
-
-    /** Détail d'une organisation. */
-    public function show(Request $request, int $id): JsonResponse
-    {
-        $organisation = Organisation::withCount('licences')->findOrFail($id);
-        return $this->succes(new OrganisationResource($organisation));
-    }
-
-    /** Met à jour les informations d'une organisation. */
-    public function update(Request $request, int $id): JsonResponse
-    {
-        $organisation = Organisation::findOrFail($id);
-
-        $validator = Validator::make($request->all(), [
-            'nom'       => ['sometimes', 'string', 'max:191'],
-            'email'     => ['sometimes', 'email', 'unique:organisations,email,' . $id],
-            'telephone' => ['nullable', 'string', 'max:50'],
-            'adresse'   => ['nullable', 'string', 'max:255'],
-            'pays'      => ['nullable', 'string', 'size:2'],
-            'statut'    => ['in:actif,suspendu,expire'],
-            'notes'     => ['nullable', 'string'],
+        $organisation = Organisation::create([
+            'nom'           => $donnees['nom'],
+            'email_contact' => $donnees['email_contact'],
+            'telephone'     => $donnees['telephone'] ?? null,
+            'adresse'       => $donnees['adresse'] ?? null,
+            'pays'          => strtoupper($donnees['pays']),
+            'cree_par'      => $acteur,
         ]);
 
-        if ($validator->fails()) {
+        AuditLog::enregistrer(
+            licenceId: null,
+            action:    AuditLog::ACTION_CREATION_ORGANISATION,
+            acteur:    $acteur,
+            ipSource:  $request->ip(),
+            detail:    ['org_id' => $organisation->org_id, 'nom' => $organisation->nom],
+        );
+
+        return $this->cree([
+            'org_id'        => $organisation->org_id,
+            'org_index_b36' => $organisation->org_index_b36,
+        ]);
+    }
+
+    /**
+     * Retourne le détail d'une organisation et le nombre de ses licences.
+     */
+    public function show(Request $request, string $org_id): JsonResponse
+    {
+        $organisation = Organisation::withCount('licences')->find($org_id);
+
+        if ($organisation === null) {
             return $this->erreur(
-                ErrorCodes::VALIDATION_ECHOUEE,
-                'Données invalides.',
-                ['erreurs' => $validator->errors()->toArray()],
+                ErrorCodes::ORGANISATION_INTROUVABLE,
+                "Organisation {$org_id} introuvable.",
+                [],
+                404,
             );
         }
 
-        $organisation->update($validator->validated());
-
-        return $this->succes(new OrganisationResource($organisation));
-    }
-
-    /** Supprime (soft delete) une organisation. */
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        $organisation = Organisation::findOrFail($id);
-        $organisation->delete();
-
-        return $this->succes(null, ['message' => "Organisation #{$id} supprimée."]);
+        return $this->succes([
+            'org_id'        => $organisation->org_id,
+            'org_index_b36' => $organisation->org_index_b36,
+            'nom'           => $organisation->nom,
+            'email_contact' => $organisation->email_contact,
+            'telephone'     => $organisation->telephone,
+            'adresse'       => $organisation->adresse,
+            'pays'          => $organisation->pays,
+            'nb_licences'   => $organisation->licences_count,
+            'cree_par'      => $organisation->cree_par,
+            'cree_le'       => $organisation->cree_le?->toIso8601String(),
+        ]);
     }
 }

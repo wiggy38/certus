@@ -20,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.key'       => \App\Http\Middleware\ApiKeyMiddleware::class,
             'api.key.admin' => \App\Http\Middleware\ApiKeyAdminMiddleware::class,
         ]);
+
+        // Rate limiting : 100 req/min par clé API sur toutes les routes API
+        $middleware->throttleApi('api_certus');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

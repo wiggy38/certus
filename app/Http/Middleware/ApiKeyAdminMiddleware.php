@@ -3,31 +3,26 @@
 namespace App\Http\Middleware;
 
 use App\Constants\ErrorCodes;
-use App\Models\Organisation;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Restreint l'accès aux clés API de rôle ADMIN.
+ * Restreint l'accès aux clés API de niveau ADMIN.
  *
- * ÉVOLUTION SCHEMA : le rôle n'est plus stocké sur `organisations`.
- * Il sera porté par la colonne `role` de la future table `api_keys`.
+ * Doit être chaîné APRÈS ApiKeyMiddleware, qui injecte 'apiKeyNiveau'
+ * dans $request->attributes. Retourne 403 si le niveau est CLIENT.
  *
- * Ce middleware doit être chaîné après ApiKeyMiddleware, qui injectera
- * le rôle via $request->attributes->set('api_key_role', $role).
- *
- * Usage dans les routes :
- *   Route::middleware(['api.key', 'api.key.admin'])->group(function () { ... });
+ * Usage :
+ *   Route::middleware(['api.key', 'api.key.admin'])->group(...)
  */
 class ApiKeyAdminMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        /** @var Organisation|null $organisation */
-        $organisation = $request->attributes->get('organisation');
+        $niveau = $request->attributes->get('apiKeyNiveau');
 
-        if (! $organisation) {
+        if ($niveau === null) {
             return $this->erreur(
                 ErrorCodes::API_KEY_MANQUANTE,
                 'Authentification requise. Chaînez api.key avant api.key.admin.',
@@ -35,13 +30,7 @@ class ApiKeyAdminMiddleware
             );
         }
 
-        // TODO: lire le rôle depuis les attributs injectés par ApiKeyMiddleware
-        // $role = $request->attributes->get('api_key_role');
-        // if ($role !== 'ADMIN') { ... }
-
-        $role = $request->attributes->get('api_key_role');
-
-        if ($role !== 'ADMIN') {
+        if ($niveau !== 'ADMIN') {
             return $this->erreur(
                 ErrorCodes::API_KEY_INSUFFISANTE,
                 'Accès refusé : droits ADMIN requis pour cette ressource.',

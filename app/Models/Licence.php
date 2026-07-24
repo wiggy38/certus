@@ -91,6 +91,7 @@ class Licence extends Model
         'date_emission',
         'date_expiration',
         'version_format',
+        'anti_rejeu',       // CHAR(2) — passé depuis CleService::generer(), sinon généré en boot
         'cle_hash_sha256',
         'crc_g5',
         'statut',
@@ -126,7 +127,10 @@ class Licence extends Model
 
         static::creating(function (Licence $licence): void {
             $licence->licence_id = static::prochainLicenceId();
-            $licence->anti_rejeu = static::genererAntiRejeu();
+            // Ne génère l'anti_rejeu que s'il n'a pas été fourni (ex: par CleService::generer())
+            if (empty($licence->anti_rejeu)) {
+                $licence->anti_rejeu = static::genererAntiRejeu();
+            }
 
             if (empty($licence->cree_le)) {
                 $licence->cree_le = now();

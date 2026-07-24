@@ -36,20 +36,29 @@ class AuditLog extends Model
     // Constantes — Actions documentées (max 30 chars)
     // ----------------------------------------------------------------
 
-    const ACTION_LICENCE_VERIFIEE   = 'LICENCE_VERIFIEE';    // GET  /licences/{id}/verifier
-    const ACTION_LICENCE_ACTIVEE    = 'LICENCE_ACTIVEE';     // POST /activations
-    const ACTION_LICENCE_DESACTIVEE = 'LICENCE_DESACTIVEE';  // DELETE /activations/{id}
-    const ACTION_LICENCE_SUSPENDUE  = 'LICENCE_SUSPENDUE';   // POST /licences/{id}/suspendre
-    const ACTION_LICENCE_REVOQUEE   = 'LICENCE_REVOQUEE';    // POST /licences/{id}/revoquer
-    const ACTION_LICENCE_EXPIREE    = 'LICENCE_EXPIREE';     // scheduler
-    const ACTION_HEARTBEAT          = 'HEARTBEAT';            // POST /activations/{id}/heartbeat
+    // Parcours 1 — création et cycle de vie
+    const ACTION_CREATION_ORGANISATION = 'CREATION_ORGANISATION'; // POST /organisations
+    const ACTION_GENERATION          = 'GENERATION';          // POST /licences (émission clé)
+    const ACTION_REVOCATION          = 'REVOCATION';          // POST /licences/{id}/revoquer
+
+    // Parcours 2 — activations
+    const ACTION_LICENCE_VERIFIEE    = 'LICENCE_VERIFIEE';    // GET  /licences/{id}/verifier
+    const ACTION_LICENCE_ACTIVEE     = 'LICENCE_ACTIVEE';     // POST /licences/activer
+    const ACTION_LICENCE_DESACTIVEE  = 'LICENCE_DESACTIVEE';  // désactivation manuelle
+    const ACTION_LICENCE_SUSPENDUE   = 'LICENCE_SUSPENDUE';   // POST /licences/{id}/suspendre
+    const ACTION_LICENCE_REVOQUEE    = 'LICENCE_REVOQUEE';    // alias legacy
+    const ACTION_LICENCE_EXPIREE     = 'LICENCE_EXPIREE';     // scheduler
+    const ACTION_HEARTBEAT           = 'HEARTBEAT';           // heartbeat machine
     const ACTION_ACTIVATION_REACTIVE = 'ACTIVATION_REACTIVE'; // reactiver()
-    const ACTION_FP_BLACKLISTE      = 'FP_BLACKLISTE';       // POST /blacklist/fingerprints
-    const ACTION_FP_SUPPRIME        = 'FP_SUPPRIME';         // DELETE /blacklist/fingerprints/{id}
-    const ACTION_PIRATAGE_DETECTE   = 'PIRATAGE_DETECTE';    // SignalService
+    const ACTION_FP_BLACKLISTE       = 'FP_BLACKLISTE';       // POST /blacklist/fingerprints
+    const ACTION_FP_SUPPRIME         = 'FP_SUPPRIME';         // DELETE /blacklist/fingerprints/{id}
+    const ACTION_PIRATAGE_DETECTE    = 'PIRATAGE_DETECTE';    // SignalService
+    const ACTION_TENTATIVE_REJETEE          = 'TENTATIVE_REJETEE';          // activation refusée (toute raison)
+    const ACTION_BLOCAGE_FINGERPRINT_MANUEL = 'BLOCAGE_FINGERPRINT_MANUEL'; // POST /blacklist/fingerprints (admin)
+    const ACTION_RESET_ALERTES              = 'RESET_ALERTES';              // PATCH /licences/{id}/reset-alertes
 
     protected $fillable = [
-        'licence_id',
+        'licence_id',   // nullable — null pour les entrées au niveau organisation
         'action',
         'acteur',
         'ip_source',
@@ -111,14 +120,14 @@ class AuditLog extends Model
      * Crée et persiste une entrée d'audit.
      * Méthode à appeler depuis les contrôleurs et services.
      *
-     * @param string      $licenceId  Clé de la licence concernée
+     * @param string|null $licenceId  Clé de la licence concernée — null pour les événements org
      * @param string      $action     Constante ACTION_* de cette classe
      * @param string      $acteur     Id utilisateur, clé API tronquée, 'systeme'
      * @param string|null $ipSource   IP source de la requête
      * @param mixed       $detail     Données complémentaires (array JSON-encodé ou string)
      */
     public static function enregistrer(
-        string $licenceId,
+        ?string $licenceId,
         string $action,
         string $acteur,
         ?string $ipSource = null,

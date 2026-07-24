@@ -2,86 +2,138 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Models\Activation;
+use App\Constants\ErrorCodes;
 use App\Models\AuditLog;
 use App\Models\Licence;
-use App\Models\Organisation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 /**
- * Tableau de bord, audit et signaux de piratage pour les administrateurs.
+ * Surveillance des anomalies et alertes de piratage — Parcours 5.
  * Toutes les routes nécessitent le rôle ADMIN.
  *
  * Routes :
- *   GET /api/v1/monitoring/tableau-de-bord   → tableauDeBord()
- *   GET /api/v1/monitoring/audit             → audit()
- *   GET /api/v1/monitoring/signaux           → signaux()
+ *   GET   /api/v1/monitoring/alertes              → alertes()
+ *   PATCH /api/v1/licences/{licence_id}/reset-alertes → resetAlertes()
  */
 class MonitoringController extends BaseApiController
 {
     /**
-     * Vue d'ensemble du système : compteurs clés en temps réel.
+     * Licences présentant des tentatives suspectes, enrichies avec org_nom
+     * et le dernier signal enregistré dans audit_log.
+     *
+     * Triées par tentatives_suspectes DESC.
      */
-    public function tableauDeBord(Request $request): JsonResponse
+    public function alertes(Request $request): JsonResponse
     {
-        return $this->succes([
-            'organisations' => [
-                'total'     => Organisation::count(),
-                'actives'   => Organisation::where('statut', 'actif')->count(),
-            ],
-            'licences' => [
-                'actives'          => Licence::where('statut', 'active')->count(),
-                'suspendues'       => Licence::where('statut', 'suspendue')->count(),
-                'expirees'         => Licence::where('statut', 'expiree')->count(),
-                'revoquees'        => Licence::where('statut', 'revoquee')->count(),
-                'expirent_30_jours' => Licence::where('statut', 'active')
-                    ->whereBetween('date_expiration', [now(), now()->addDays(30)])
-                    ->count(),
-            ],
-            'activations' => [
-                'actives'   => Activation::where('statut', 'active')->count(),
-                'revoquees' => Activation::where('statut', 'revoquee')->count(),
-            ],
-            'horodatage' => now()->toIso8601String(),
-        ]);
-    }
+        // Sous-requêtes pour récupérer le dernier signal depuis audit_log
+        $dernierSignalAction = DB::raw(
+            "(SELECT action FROM audit_log
+              WHERE audit_log.licence_id = licences.licence_id
+              AND action IN (
+                  '" . AuditLog::ACTION_TENTATIVE_REJETEE . "',
+                  '" . AuditLog::ACTION_PIRATAGE_DETECTE  . "'
+              )
+              ORDER BY horodatage DESC LIMIT 1) AS dernier_signal"
+        );
 
-    /**
-     * Journal d'audit paginé (toutes les actions API tracées).
-     */
-    public function audit(Request $request): JsonResponse
-    {
-        $paginator = AuditLog::with('organisation')
-            ->when($request->filled('organisation_id'), fn ($q) =>
-                $q->where('organisation_id', $request->integer('organisation_id'))
-            )
-            ->when($request->filled('action'), fn ($q) =>
-                $q->where('action', 'like', '%' . $request->input('action') . '%')
-            )
-            ->when($request->filled('depuis'), fn ($q) =>
-                $q->where('survenu_le', '>=', $request->input('depuis'))
-            )
-            ->latest('survenu_le')
-            ->paginate($request->integer('par_page', 50));
+        $dernierSignalHorodatage = DB::raw(
+            "(SELECT horodatage FROM audit_log
+              WHERE audit_log.licence_id = licences.licence_id
+              AND action IN (
+                  '" . AuditLog::ACTION_TENTATIVE_REJETEE . "',
+                  '" . AuditLog::ACTION_PIRATAGE_DETECTE  . "'
+              )
+              ORDER BY horodatage DESC LIMIT 1) AS dernier_signal_le"
+        );
 
-        return $this->liste($paginator->items(), $this->metaPagination($paginator));
-    }
-
-    /**
-     * Signaux de piratage récents (100 derniers).
-     * Filtrés depuis audit_logs où l'action commence par 'SIGNAL_'.
-     */
-    public function signaux(Request $request): JsonResponse
-    {
-        $signaux = AuditLog::where('action', 'like', 'SIGNAL_%')
-            ->latest('survenu_le')
-            ->limit(100)
+        $alertes = Licence::query()
+            ->select([
+                'licences.licence_id',
+                'licences.org_id',
+                'licences.statut',
+                'licences.type_licence',
+                'licences.tentatives_suspectes',
+                'organisations.nom AS org_nom',
+                $dernierSignalAction,
+                $dernierSignalHorodatage,
+            ])
+            ->join('organisations', 'licences.org_id', '=', 'organisations.org_id')
+            ->where('licences.tentatives_suspectes', '>', 0)
+            ->orderByDesc('licences.tentatives_suspectes')
             ->get();
 
-        return $this->succes($signaux, [
-            'total'         => $signaux->count(),
-            'horodatage'    => now()->toIso8601String(),
+        return $this->succes(
+            $alertes->map(fn ($row) => [
+                'licence_id'           => $row->licence_id,
+                'org_id'               => $row->org_id,
+                'org_nom'              => $row->org_nom,
+                'statut'               => $row->statut,
+                'type_licence'         => $row->type_licence,
+                'tentatives_suspectes' => $row->tentatives_suspectes,
+                'dernier_signal'       => $row->dernier_signal,
+                'dernier_signal_le'    => $row->dernier_signal_le,
+            ])->values()->all(),
+            [
+                'total'      => $alertes->count(),
+                'horodatage' => now()->toIso8601String(),
+            ],
+        );
+    }
+
+    /**
+     * Remet à zéro le compteur tentatives_suspectes d'une licence.
+     * Un motif est obligatoire pour traçabilité.
+     */
+    public function resetAlertes(Request $request, string $licence_id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'motif' => ['required', 'string', 'max:255'],
+        ]);
+
+        if ($validator->fails()) {
+            return $this->erreur(
+                ErrorCodes::VALIDATION_ECHOUEE,
+                'Le champ motif est obligatoire.',
+                ['erreurs' => $validator->errors()->toArray()],
+                422,
+            );
+        }
+
+        $licence = Licence::find($licence_id);
+
+        if ($licence === null) {
+            return $this->erreur(
+                ErrorCodes::LICENCE_INTROUVABLE,
+                "Licence {$licence_id} introuvable.",
+                [],
+                404,
+            );
+        }
+
+        $motif  = $validator->validated()['motif'];
+        $acteur = $this->acteurCourant($request);
+
+        DB::table('licences')
+            ->where('licence_id', $licence_id)
+            ->update(['tentatives_suspectes' => 0]);
+
+        AuditLog::enregistrer(
+            licenceId: $licence_id,
+            action:    AuditLog::ACTION_RESET_ALERTES,
+            acteur:    $acteur,
+            ipSource:  $request->ip(),
+            detail:    [
+                'motif'                   => $motif,
+                'ancienne_valeur'         => $licence->tentatives_suspectes,
+            ],
+        );
+
+        return $this->succes([
+            'licence_id'           => $licence_id,
+            'tentatives_suspectes' => 0,
         ]);
     }
 }

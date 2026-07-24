@@ -12,64 +12,60 @@ use Illuminate\Support\Facades\Route;
 | API Certus v1 — Base URL : https://certus.expertosoft.com/api/v1
 |--------------------------------------------------------------------------
 |
-| Middleware :
-|   api.key       → vérifie X-API-Key (toutes les routes protégées)
-|   api.key.admin → restreint aux clés de rôle ADMIN
+| Authentification : header X-API-Key (table api_keys)
+|   api.key       → présence + validité de la clé (tout niveau)
+|   api.key.admin → niveau ADMIN requis (chaîné après api.key)
 |
 */
 
-// Route de santé publique (pas d'auth requise)
+// Route de santé publique — pas d'authentification requise
 Route::get('/status', function () {
     return response()->json([
-        'statut'  => 'OK',
-        'data'    => [
+        'statut' => 'OK',
+        'data'   => [
             'app'     => config('app.name'),
             'version' => 'v1',
             'time'    => now()->toIso8601String(),
         ],
-        'meta'    => [],
+        'meta'   => [],
     ]);
 });
 
-// ----------------------------------------------------------------
-// Routes protégées par clé API (CLIENT + ADMIN)
-// ----------------------------------------------------------------
 Route::middleware('api.key')->group(function () {
 
-    // Licences — lecture accessible à tous
-    Route::get('/licences', [LicenceController::class, 'index']);
-    Route::get('/licences/{id}', [LicenceController::class, 'show']);
-    Route::get('/licences/{licenceId}/activations', [ActivationController::class, 'index']);
-
-    // Activations — opérations machine
-    Route::post('/activations', [ActivationController::class, 'activer']);
-    Route::post('/activations/{id}/heartbeat', [ActivationController::class, 'heartbeat']);
-    Route::delete('/activations/{id}', [ActivationController::class, 'revoquer']);
-
-    // Vérification blacklist (lecture, accessible sans rôle admin)
-    Route::get('/blacklist/verifier', [BlacklistController::class, 'verifier']);
-
     // ----------------------------------------------------------------
-    // Routes réservées aux ADMIN
+    // P1 — Routes réservées aux clés ADMIN
     // ----------------------------------------------------------------
     Route::middleware('api.key.admin')->group(function () {
 
         // Organisations
-        Route::apiResource('organisations', OrganisationController::class);
+        Route::post('/organisations', [OrganisationController::class, 'store']);
+        Route::get('/organisations/{org_id}', [OrganisationController::class, 'show']);
 
-        // Licences — écriture
+        // Licences — émission et cycle de vie
         Route::post('/licences', [LicenceController::class, 'store']);
-        Route::post('/licences/{id}/suspendre', [LicenceController::class, 'suspendre']);
-        Route::post('/licences/{id}/revoquer', [LicenceController::class, 'revoquer']);
+        Route::get('/licences/{licence_id}', [LicenceController::class, 'show']);
+        Route::post('/licences/{licence_id}/revoquer', [LicenceController::class, 'revoquer']);
 
-        // Blacklist fingerprints
+        // Activations — consultation et modification
+        Route::get('/licences/{licence_id}/activations', [ActivationController::class, 'index']);
+        Route::patch('/licences/{licence_id}/activations/{activation_id}', [ActivationController::class, 'update']);
+
+        // Blacklist empreintes
+        Route::post('/blacklist/fingerprints', [BlacklistController::class, 'store']);
         Route::get('/blacklist/fingerprints', [BlacklistController::class, 'index']);
-        Route::post('/blacklist/fingerprints', [BlacklistController::class, 'ajouter']);
-        Route::delete('/blacklist/fingerprints/{id}', [BlacklistController::class, 'retirer']);
 
-        // Monitoring
-        Route::get('/monitoring/tableau-de-bord', [MonitoringController::class, 'tableauDeBord']);
-        Route::get('/monitoring/audit', [MonitoringController::class, 'audit']);
-        Route::get('/monitoring/signaux', [MonitoringController::class, 'signaux']);
+        // Audit et historique
+        Route::get('/licences/{licence_id}/audit', [LicenceController::class, 'audit']);
+        Route::get('/licences/{licence_id}/historique-activations', [ActivationController::class, 'historique']);
+
+        // Monitoring / alertes
+        Route::get('/monitoring/alertes', [MonitoringController::class, 'alertes']);
+        Route::patch('/licences/{licence_id}/reset-alertes', [MonitoringController::class, 'resetAlertes']);
     });
+
+    // ----------------------------------------------------------------
+    // P2 — Routes CLIENT (activation machine)
+    // ----------------------------------------------------------------
+    Route::post('/licences/activer', [ActivationController::class, 'activer']);
 });

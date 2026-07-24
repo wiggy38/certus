@@ -37,6 +37,12 @@ final class ErrorCodes
     // ----------------------------------------------------------------
     const ANTIREJEU_INVALIDE     = 'ANTIREJEU_INVALIDE';
     const ANTIREJEU_REJOUE       = 'ANTIREJEU_REJOUE';
+    const ANTIREJEU_BLACKLISTE   = 'ANTIREJEU_BLACKLISTE'; // anti_rejeu blacklisté (Signal 4 / révocation)
+
+    // ----------------------------------------------------------------
+    // Clé — introuvable en BDD (lookup par SHA-256)
+    // ----------------------------------------------------------------
+    const LICENCE_INCONNUE       = 'LICENCE_INCONNUE';    // aucune licence pour ce hash SHA-256
 
     // ----------------------------------------------------------------
     // Organisation

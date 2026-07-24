@@ -3,60 +3,52 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Constants\ErrorCodes;
-use App\Http\Resources\LicenceResource;
+use App\Models\Activation;
+use App\Models\ActivationHistorique;
+use App\Models\AuditLog;
+use App\Models\BlacklistAntirejeu;
 use App\Models\Licence;
 use App\Models\Organisation;
 use App\Services\CleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 /**
- * Émission et gestion du cycle de vie des licences Experto.
+ * Émission et cycle de vie des licences Experto — Parcours 1.
  *
- * Routes :
- *   GET    /api/v1/licences                    → index()      [api.key]
- *   POST   /api/v1/licences                    → store()      [api.key.admin]
- *   GET    /api/v1/licences/{id}               → show()       [api.key]
- *   POST   /api/v1/licences/{id}/suspendre     → suspendre()  [api.key.admin]
- *   POST   /api/v1/licences/{id}/revoquer      → revoquer()   [api.key.admin]
+ * Routes (protégées par api.key.admin) :
+ *   POST  /api/v1/licences                           → store()
+ *   GET   /api/v1/licences/{licence_id}              → show()
+ *   POST  /api/v1/licences/{licence_id}/revoquer     → revoquer()
+ *   GET   /api/v1/licences/{licence_id}/audit        → audit()
  */
 class LicenceController extends BaseApiController
 {
     public function __construct(private readonly CleService $cleService) {}
 
     /**
-     * Liste les licences de l'organisation appelante (CLIENT)
-     * ou toutes les licences (ADMIN).
+     * Émet une nouvelle licence et génère la clé XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.
+     *
+     * Flux :
+     *   1. Valider les champs
+     *   2. Charger l'organisation → récupérer org_index_b36 pour G1 de la clé
+     *   3. Appeler CleService::generer() → {cle, anti_rejeu, crc_g5, cle_hash_sha256}
+     *   4. INSERT licences — licence_id généré par le modèle, anti_rejeu du CleService
+     *   5. INSERT audit_log ACTION_GENERATION
+     *   6. Retourner 201 {licence_id, cle, anti_rejeu} — cle_hash_sha256 NON exposé
      */
-    public function index(Request $request): JsonResponse
-    {
-        $organisation = $this->organisationCourante($request);
-
-        $query = $organisation->estAdmin()
-            ? Licence::with('organisation')
-            : Licence::where('organisation_id', $organisation->id);
-
-        $paginator = $query->paginate($request->integer('par_page', 20));
-
-        return $this->liste(
-            LicenceResource::collection($paginator),
-            $this->metaPagination($paginator),
-        );
-    }
-
-    /** Émet une nouvelle licence pour une organisation. */
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'organisation_id' => ['required', 'integer', 'exists:organisations,id'],
-            'produit'         => ['required', 'string', 'max:100'],
-            'version'         => ['required', 'string', 'max:20'],
-            'type'            => ['required', 'in:standard,premium,entreprise'],
-            'date_debut'      => ['required', 'date'],
-            'date_expiration' => ['required', 'date', 'after:date_debut'],
-            'max_activations' => ['required', 'integer', 'min:1'],
-            'metadata'        => ['nullable', 'array'],
+            'org_id'          => ['required', 'string', 'exists:organisations,org_id'],
+            'type_licence'    => ['required', 'string', 'in:1,2,3,4,9'],
+            'nb_postes'       => ['required', 'integer', 'min:0'],
+            'nb_sites'        => ['required', 'integer', 'min:0'],
+            'nb_projets'      => ['required', 'integer', 'min:0'],
+            'date_expiration' => ['required', 'date', 'after:today'],
+            'notes'           => ['nullable', 'string', 'max:2000'],
         ]);
 
         if ($validator->fails()) {
@@ -64,81 +56,262 @@ class LicenceController extends BaseApiController
                 ErrorCodes::VALIDATION_ECHOUEE,
                 'Données invalides.',
                 ['erreurs' => $validator->errors()->toArray()],
+                422,
             );
         }
 
         $donnees = $validator->validated();
+        $acteur  = $this->acteurCourant($request);
 
-        // Génération de la clé signée
-        $cle = $this->cleService->generer([
-            'organisation_id' => $donnees['organisation_id'],
-            'produit'         => $donnees['produit'],
-            'version'         => $donnees['version'],
-            'type'            => $donnees['type'],
+        $organisation = Organisation::find($donnees['org_id']);
+        if ($organisation === null) {
+            return $this->erreur(
+                ErrorCodes::ORGANISATION_INTROUVABLE,
+                "Organisation {$donnees['org_id']} introuvable.",
+                [],
+                404,
+            );
+        }
+
+        $payload = $this->cleService->generer([
+            'org_index_b36'  => $organisation->org_index_b36,
+            'nb_postes'      => $donnees['nb_postes'],
+            'nb_sites'       => $donnees['nb_sites'],
+            'nb_projets'     => $donnees['nb_projets'],
+            'type_licence'   => $donnees['type_licence'],
             'date_expiration' => $donnees['date_expiration'],
-            'max_activations' => $donnees['max_activations'],
+            'version_format' => 1,
         ]);
 
-        $licence = Licence::create(array_merge($donnees, [
-            'cle'                => $cle,
-            'statut'             => 'active',
-            'activations_count'  => 0,
-        ]));
+        $licence = Licence::create([
+            'org_id'          => $organisation->org_id,
+            'type_licence'    => $donnees['type_licence'],
+            'nb_postes'       => $donnees['nb_postes'],
+            'nb_sites'        => $donnees['nb_sites'],
+            'nb_projets'      => $donnees['nb_projets'],
+            'date_expiration' => $donnees['date_expiration'],
+            'version_format'  => 1,
+            'anti_rejeu'      => $payload['anti_rejeu'],   // synchronisé avec la clé
+            'cle_hash_sha256' => $payload['cle_hash_sha256'],
+            'crc_g5'          => $payload['crc_g5'],
+            'notes'           => $donnees['notes'] ?? null,
+            'cree_par'        => $acteur,
+        ]);
 
-        // Retourne la clé en clair une seule fois à l'émission
-        $data = (new LicenceResource($licence))->toArray($request);
-        $data['cle'] = $cle;
+        AuditLog::enregistrer(
+            licenceId: $licence->licence_id,
+            action:    AuditLog::ACTION_GENERATION,
+            acteur:    $acteur,
+            ipSource:  $request->ip(),
+            detail:    [
+                'org_id'       => $organisation->org_id,
+                'type_licence' => $licence->type_libelle,
+                'nb_postes'    => $licence->nb_postes,
+                'nb_sites'     => $licence->nb_sites,
+                'nb_projets'   => $licence->nb_projets,
+                'expiration'   => $licence->date_expiration?->toDateString(),
+            ],
+        );
 
-        return $this->cree($data, ['message' => 'Licence émise. La clé ne sera plus retournée après cette réponse.']);
+        return $this->cree([
+            'licence_id' => $licence->licence_id,
+            'cle'        => $payload['cle'],
+            'anti_rejeu' => $payload['anti_rejeu'],
+        ]);
     }
 
-    /** Détail d'une licence. */
-    public function show(Request $request, int $id): JsonResponse
+    /**
+     * Retourne tous les champs d'une licence, sauf cle_hash_sha256.
+     */
+    public function show(Request $request, string $licence_id): JsonResponse
     {
-        $licence = Licence::with('organisation')->findOrFail($id);
-        return $this->succes(new LicenceResource($licence));
-    }
+        $licence = Licence::with('organisation')->find($licence_id);
 
-    /** Suspend une licence (désactive sans révoquer). */
-    public function suspendre(Request $request, int $id): JsonResponse
-    {
-        $licence = Licence::findOrFail($id);
-
-        if (! in_array($licence->statut, ['active'])) {
+        if ($licence === null) {
             return $this->erreur(
-                ErrorCodes::LICENCE_INVALIDE,
-                "Impossible de suspendre une licence avec le statut «{$licence->statut}».",
+                ErrorCodes::LICENCE_INTROUVABLE,
+                "Licence {$licence_id} introuvable.",
+                [],
+                404,
             );
         }
 
-        $licence->update(['statut' => 'suspendue']);
-
-        return $this->succes(
-            new LicenceResource($licence),
-            ['message' => "Licence #{$id} suspendue."],
-        );
+        return $this->succes([
+            'licence_id'           => $licence->licence_id,
+            'org_id'               => $licence->org_id,
+            'type_licence'         => $licence->type_licence,
+            'type_libelle'         => $licence->type_libelle,
+            'nb_postes'            => $licence->nb_postes,
+            'nb_sites'             => $licence->nb_sites,
+            'nb_projets'           => $licence->nb_projets,
+            'date_emission'        => $licence->date_emission?->toDateString(),
+            'date_expiration'      => $licence->date_expiration?->toDateString(),
+            'version_format'       => $licence->version_format,
+            'anti_rejeu'           => $licence->anti_rejeu,
+            'crc_g5'               => $licence->crc_g5,
+            'statut'               => $licence->statut,
+            'nb_activations'       => $licence->nb_activations,
+            'tentatives_suspectes' => $licence->tentatives_suspectes,
+            'notes'                => $licence->notes,
+            'cree_par'             => $licence->cree_par,
+            'cree_le'              => $licence->cree_le?->toIso8601String(),
+            'modifie_le'           => $licence->modifie_le?->toIso8601String(),
+            'modifie_par'          => $licence->modifie_par,
+            'organisation'         => [
+                'org_id' => $licence->organisation?->org_id,
+                'nom'    => $licence->organisation?->nom,
+                'pays'   => $licence->organisation?->pays,
+            ],
+        ]);
     }
 
-    /** Révoque définitivement une licence. */
-    public function revoquer(Request $request, int $id): JsonResponse
+    /**
+     * Révoque définitivement une licence.
+     *
+     * Flux atomique (transaction DB) :
+     *   1. Valider motif
+     *   2. Passer licence → REVOQUEE
+     *   3. Passer toutes les activations ACTIVE → REVOQUEE
+     *   4. INSERT activation_historique EVT_EXPIRATION pour chaque activation fermée
+     *   5. INSERT blacklist_antirejeu (anti_rejeu de la licence)
+     *   6. INSERT audit_log ACTION_REVOCATION
+     *
+     * Retourne le nombre d'activations fermées pour permettre un audit côté appelant.
+     */
+    public function revoquer(Request $request, string $licence_id): JsonResponse
     {
-        $licence = Licence::findOrFail($id);
+        $validator = Validator::make($request->all(), [
+            'motif' => ['nullable', 'string', 'max:255'],
+        ]);
 
-        if ($licence->statut === 'revoquee') {
+        if ($validator->fails()) {
+            return $this->erreur(
+                ErrorCodes::VALIDATION_ECHOUEE,
+                'Données invalides.',
+                ['erreurs' => $validator->errors()->toArray()],
+                422,
+            );
+        }
+
+        $licence = Licence::find($licence_id);
+
+        if ($licence === null) {
+            return $this->erreur(
+                ErrorCodes::LICENCE_INTROUVABLE,
+                "Licence {$licence_id} introuvable.",
+                [],
+                404,
+            );
+        }
+
+        if ($licence->statut === Licence::STATUT_REVOQUEE) {
             return $this->erreur(
                 ErrorCodes::LICENCE_REVOQUEE,
-                "La licence #{$id} est déjà révoquée.",
+                "La licence {$licence_id} est déjà révoquée.",
+                [],
+                409,
             );
         }
 
-        $licence->update(['statut' => 'revoquee']);
+        $motif  = $validator->validated()['motif'] ?? null;
+        $acteur = $this->acteurCourant($request);
 
-        // TODO: révoquer toutes les activations actives liées
-        // TODO: notifier l'organisation via NotificationService
+        $activationsClosees = DB::transaction(function () use ($licence, $motif, $acteur, $request): int {
+            $licence->update(['statut' => Licence::STATUT_REVOQUEE]);
 
-        return $this->succes(
-            new LicenceResource($licence),
-            ['message' => "Licence #{$id} révoquée définitivement."],
-        );
+            $activations = Activation::where('licence_id', $licence->licence_id)
+                ->where('statut', Activation::STATUT_ACTIVE)
+                ->get();
+
+            foreach ($activations as $activation) {
+                $activation->update(['statut' => Activation::STATUT_REVOQUEE]);
+
+                ActivationHistorique::enregistrer(
+                    activationId: $activation->activation_id,
+                    licenceId:    $licence->licence_id,
+                    evenement:    ActivationHistorique::EVT_EXPIRATION,
+                    acteur:       $acteur,
+                    ipSource:     $request->ip(),
+                    motif:        $motif ?? 'Révocation de la licence',
+                );
+            }
+
+            BlacklistAntirejeu::enregistrer(
+                antiRejeu: $licence->anti_rejeu,
+                licenceId: $licence->licence_id,
+                bloquePar: $acteur,
+                motif:     $motif ?? 'Révocation de la licence',
+            );
+
+            AuditLog::enregistrer(
+                licenceId: $licence->licence_id,
+                action:    AuditLog::ACTION_REVOCATION,
+                acteur:    $acteur,
+                ipSource:  $request->ip(),
+                detail:    [
+                    'motif'              => $motif,
+                    'activations_closes' => $activations->count(),
+                ],
+            );
+
+            return $activations->count();
+        });
+
+        return $this->succes([
+            'licence_id'         => $licence->licence_id,
+            'statut'             => $licence->fresh()->statut,
+            'activations_closes' => $activationsClosees,
+        ]);
+    }
+
+    /**
+     * Retourne le journal d'audit paginé d'une licence.
+     *
+     * Paramètres query :
+     *   action  — filtre sur la colonne action (exact match)
+     *   depuis  — entrées à partir de cette date/heure (ISO 8601 ou YYYY-MM-DD)
+     *   jusqu   — entrées jusqu'à cette date/heure
+     *   page    — page courante (défaut : 1)
+     *   limite  — entrées par page (défaut : 50, max : 200)
+     */
+    public function audit(Request $request, string $licence_id): JsonResponse
+    {
+        $licence = Licence::find($licence_id);
+
+        if ($licence === null) {
+            return $this->erreur(
+                ErrorCodes::LICENCE_INTROUVABLE,
+                "Licence {$licence_id} introuvable.",
+                [],
+                404,
+            );
+        }
+
+        $limite = min((int) $request->query('limite', 50), 200);
+        $page   = max((int) $request->query('page', 1), 1);
+
+        $query = AuditLog::where('licence_id', $licence_id);
+
+        if ($request->filled('action')) {
+            $query->where('action', $request->query('action'));
+        }
+
+        if ($request->filled('depuis')) {
+            $query->where('horodatage', '>=', $request->query('depuis'));
+        }
+
+        if ($request->filled('jusqu')) {
+            $query->where('horodatage', '<=', $request->query('jusqu'));
+        }
+
+        $paginator = $query
+            ->orderByDesc('horodatage')
+            ->paginate($limite, ['*'], 'page', $page);
+
+        return $this->succes($paginator->items(), [
+            'total'  => $paginator->total(),
+            'page'   => $paginator->currentPage(),
+            'limite' => $paginator->perPage(),
+        ]);
     }
 }
