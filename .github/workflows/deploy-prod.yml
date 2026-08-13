@@ -1,18 +1,54 @@
 name: Deploy to production
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: 'Tape "DEPLOY" pour confirmer le déploiement en production'
+        required: true
+        type: string
 
 jobs:
-  deploy:
+  validate-prod-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: production
 
     steps:
+      - name: Validate manual confirmation
+        run: |
+          if [ "${{ inputs.confirm_production }}" != "DEPLOY" ]; then
+            echo "Déploiement annulé : confirmation manuelle invalide."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, pdo_mysql, zip, curl
+          tools: composer
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --no-dev --optimize-autoloader
+
+      - name: Validate Laravel app config
+        run: |
+          php artisan config:validate
+          php artisan route:clear
+          php artisan view:clear
+          php artisan cache:clear
+
+  deploy:
+    needs: validate-prod-deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+
+    steps:
       - name: Deploy to production via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -20,13 +56,22 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
             cd /home/USERNAME/public_html/certus
-            git pull origin master
+
+            git fetch origin
+            git checkout master
+            git pull --ff-only origin master
+
             composer install --no-interaction --no-progress --prefer-dist --no-dev --optimize-autoloader
+
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
             php artisan event:cache
             php artisan migrate --force
+
             chmod -R 775 storage bootstrap/cache
             php artisan queue:restart
+
+            echo "Production deployed successfully"
