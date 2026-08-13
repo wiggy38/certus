@@ -31,9 +31,9 @@ return [
             'docs' => 'docs',
             'oauth2_callback' => 'api/oauth2-callback',
             'middleware' => [
-                'api' => [],
-                'asset' => [],
-                'docs' => [],
+                'api' => ['swagger.admin'],
+                'asset' => ['swagger.admin'],
+                'docs' => ['swagger.admin'],
                 'oauth2_callback' => [],
             ],
             'group_options' => [],
@@ -47,7 +47,7 @@ return [
         ],
 
         'scanOptions' => [
-            'open_api_spec_version' => env('L5_SWAGGER_OPEN_API_SPEC_VERSION', \L5Swagger\Generator::OPEN_API_DEFAULT_SPEC_VERSION),
+            'open_api_spec_version' => env('L5_SWAGGER_OPEN_API_SPEC_VERSION', '3.0.0'),
         ],
 
         'securityDefinitions' => [

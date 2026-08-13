@@ -17,8 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
 
         $middleware->alias([
-            'api.key'       => \App\Http\Middleware\ApiKeyMiddleware::class,
-            'api.key.admin' => \App\Http\Middleware\ApiKeyAdminMiddleware::class,
+            'api.key'         => \App\Http\Middleware\ApiKeyMiddleware::class,
+            'api.key.admin'   => \App\Http\Middleware\ApiKeyAdminMiddleware::class,
+            'swagger.admin'   => \App\Http\Middleware\SwaggerAdminAccess::class,
         ]);
 
         // Rate limiting : 100 req/min par clé API sur toutes les routes API
