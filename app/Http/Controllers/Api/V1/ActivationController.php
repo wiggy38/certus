@@ -51,24 +51,24 @@ class ActivationController extends BaseApiController
     // ================================================================
 
     /**
-     * Active une licence Experto sur une machine cliente.
-     *
-     * Flux de sécurité (ordre strict) :
-     *   1.  Validation champs d'entrée
-     *   2.  Normalisation + vérification longueur de la clé (25 chars sans tirets)
-     *   3.  Vérification CRC32 via CleService::verifierCRC()
-     *   4.  Décodage payload + vérification date d'expiration
-     *   5.  Vérification blacklist_antirejeu (anti_rejeu de G4)
-     *   6.  Vérification blacklist_fingerprints
-     *   7.  Lookup licence par SHA-256(clé normalisée avec tirets)
-     *   8.  Vérification statut = ACTIVE
-     *   9.  Vérification des 4 signaux d'anomalie (SignalService)
-     *   10. Transaction atomique : INSERT activations + historique + audit_log, UPDATE nb_activations
-     *   11. Génération token JWT local (HS256, signé avec APP_KEY)
-     *   12. Retour 200 {licence_id, org_nom, type_licence, …, modules[], token_local}
-     *
-     * Toutes les tentatives (succès ET échecs) sont loggées dans audit_log.
-     */
+    * Active une licence Experto sur une machine cliente.
+    *
+    * Flux de sécurité (ordre strict) :
+    *   1.  Validation champs d'entrée
+    *   2.  Normalisation + vérification longueur de la clé (25 chars sans tirets)
+    *   3.  Vérification CRC32 via CleService::verifierCRC()
+    *   4.  Décodage payload + vérification date d'expiration
+    *   5.  Vérification blacklist_antirejeu (anti_rejeu de G4)
+    *   6.  Vérification blacklist_fingerprints
+    *   7.  Lookup licence par SHA-256(clé normalisée avec tirets)
+    *   8.  Vérification statut = ACTIVE
+    *   9.  Vérification des 4 signaux d'anomalie (SignalService)
+    *   10. Transaction atomique : INSERT activations + historique + audit_log, UPDATE nb_activations
+    *   11. Génération token JWT local (HS256, signé avec APP_KEY)
+    *   12. Retour 200 {licence_id, org_nom, type_licence, …, modules[], token_local}
+    *
+    * Toutes les tentatives (succès ET échecs) sont loggées dans audit_log.
+    */
     public function activer(Request $request): JsonResponse
     {
         // ── Étape 1 : validation ─────────────────────────────────────

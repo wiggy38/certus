@@ -29,16 +29,16 @@ class LicenceController extends BaseApiController
     public function __construct(private readonly CleService $cleService) {}
 
     /**
-     * Émet une nouvelle licence et génère la clé XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.
-     *
-     * Flux :
-     *   1. Valider les champs
-     *   2. Charger l'organisation → récupérer org_index_b36 pour G1 de la clé
-     *   3. Appeler CleService::generer() → {cle, anti_rejeu, crc_g5, cle_hash_sha256}
-     *   4. INSERT licences — licence_id généré par le modèle, anti_rejeu du CleService
-     *   5. INSERT audit_log ACTION_GENERATION
-     *   6. Retourner 201 {licence_id, cle, anti_rejeu} — cle_hash_sha256 NON exposé
-     */
+    * Émet une nouvelle licence et génère la clé XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.
+    *
+    * Flux :
+    *   1. Valider les champs
+    *   2. Charger l'organisation → récupérer org_index_b36 pour G1 de la clé
+    *   3. Appeler CleService::generer() → {cle, anti_rejeu, crc_g5, cle_hash_sha256}
+    *   4. INSERT licences — licence_id généré par le modèle, anti_rejeu du CleService
+    *   5. INSERT audit_log ACTION_GENERATION
+    *   6. Retourner 201 {licence_id, cle, anti_rejeu} — cle_hash_sha256 NON exposé
+    */
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
