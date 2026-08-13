@@ -31,7 +31,20 @@ class ApiKeyMiddleware
             );
         }
 
-        $apiKey = ApiKey::verifier($cleEnClair);
+        // Accept an explicit SWAGGER_ADMIN_TOKEN from .env as a valid admin API key
+        $apiKey = null;
+        $swaggerToken = env('SWAGGER_ADMIN_TOKEN');
+        if (!empty($swaggerToken) && hash_equals($swaggerToken, (string) $cleEnClair)) {
+            // synthétiser une instance ApiKey pour conserver l'interface attendue
+            $apiKey = new ApiKey();
+            $apiKey->id = 0;
+            $apiKey->cle_hash = hash('sha256', $cleEnClair);
+            $apiKey->niveau = 'ADMIN';
+            $apiKey->nom = 'SWAGGER_ADMIN_TOKEN';
+            $apiKey->active = true;
+        } else {
+            $apiKey = ApiKey::verifier($cleEnClair);
+        }
 
         if ($apiKey === null) {
             return $this->erreur(
