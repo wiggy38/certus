@@ -31,9 +31,9 @@ return [
             'docs' => 'docs',
             'oauth2_callback' => 'api/oauth2-callback',
             'middleware' => [
-                'api' => ['swagger.admin'],
-                'asset' => ['swagger.admin'],
-                'docs' => ['swagger.admin'],
+                'api' => [],
+                'asset' => [],
+                'docs' => [],
                 'oauth2_callback' => [],
             ],
             'group_options' => [],
