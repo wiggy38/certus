@@ -1,0 +1,33 @@
+---
+# Configuration de déploiement cPanel pour Certus
+# Remplacer USERNAME et le chemin de destination par le bon dossier du compte cPanel.
+# Exemple : /home/USERNAME/public_html/certus
+#
+# Exemple d'activation :
+# - Dans cPanel > Git Version Control > Manage > Deploy HEAD
+# - Le fichier .cpanel.yml est automatiquement lu lors du push.
+
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/c2525575c/public_html/certus
+
+    # Copier le dépôt déployé dans le dossier cible
+    - /bin/cp -R . "$DEPLOYPATH"
+
+    # Supprimer les fichiers Git inutiles dans le dossier de prod
+    - /bin/find "$DEPLOYPATH" -maxdepth 1 \( -name ".git" -o -name ".gitignore" -o -name ".cpanel.yml" \) -exec rm -rf {} +
+
+    # Installer les dépendances PHP pour la production
+    - cd "$DEPLOYPATH" && composer install --no-interaction --no-progress --prefer-dist --no-dev --optimize-autoloader
+
+    # Préparer Laravel pour la prod
+    - cd "$DEPLOYPATH" && php artisan config:cache
+    - cd "$DEPLOYPATH" && php artisan route:cache
+    - cd "$DEPLOYPATH" && php artisan view:cache
+    - cd "$DEPLOYPATH" && php artisan event:cache
+
+    # Migrations si besoin (décommenter si le serveur le permet)
+    # - cd "$DEPLOYPATH" && php artisan migrate --force
+
+    # Sécurité des permissions (à ajuster selon le compte cPanel)
+    - /bin/chmod -R 775 "$DEPLOYPATH/storage" "$DEPLOYPATH/bootstrap/cache"
